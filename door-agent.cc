@@ -20,8 +20,7 @@ namespace po = boost::program_options;
 std::string version{"0.1"};
 
 std::vector<Door> doors;
-std::string mqtt_broker;
-std::string mqtt_prefix;
+std::string mqtt_broker, mqtt_prefix, mqtt_ha_prefix, mqtt_dev_prefix;
 MqttClient mqtt_client;
 
 void load_config(string config_file)
@@ -80,6 +79,8 @@ void load_config(string config_file)
     {
         mqtt_broker = conf_mqtt["broker"].asString();
         mqtt_prefix = conf_mqtt["prefix"].asString();
+        mqtt_ha_prefix = conf_mqtt["ha_prefix"].asString();
+        mqtt_dev_prefix = conf_mqtt["device_prefix"].asString();
     }
 }
 
@@ -125,7 +126,25 @@ void publish_state(Door& door)
         state_str = "closing";
         break;
     }
-    mqtt_client.PublishTopic(mqtt_prefix + to_string(door.GetIndex()) + "/state", state_str);
+    mqtt_client.PublishTopic(mqtt_prefix + to_string(door.GetIndex()) + "/state", state_str, true);
+}
+
+void publish_discovery(Door& door)
+{
+    Json::Value disc(Json::objectValue);
+    string index = to_string(door.GetIndex());
+
+    disc["name"] = mqtt_dev_prefix + index;
+    disc["unique_id"] = mqtt_dev_prefix + index;
+    disc["state_topic"] = mqtt_prefix + index + "/state";
+    disc["command_topic"] = mqtt_prefix + index + "/command";
+    disc["payload_open"] = "open";
+    disc["payload_close"] = "close";
+
+    ostringstream ss;
+    ss << disc;
+
+    mqtt_client.PublishTopic(mqtt_ha_prefix + mqtt_dev_prefix + index + "/config", ss.str(), true);
 }
 
 int main(int argc, char **argv)
@@ -205,6 +224,7 @@ int main(int argc, char **argv)
                     }
                     publish_state(doors[0]);
                 });
+            publish_discovery(door);
         }
     }
 
