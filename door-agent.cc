@@ -23,6 +23,9 @@ std::vector<Door> doors;
 std::string mqtt_broker, mqtt_prefix, mqtt_ha_prefix, mqtt_dev_prefix;
 MqttClient mqtt_client;
 
+constexpr auto poll_time_fast = 250ms;
+constexpr auto poll_time_slow = 3s;
+
 void load_config(string config_file)
 {
     ifstream config_stream{config_file};
@@ -186,12 +189,14 @@ int main(int argc, char **argv)
 
     auto uvloop = uvw::Loop::getDefault();
     auto loop_timer = uvloop->resource<uvw::TimerHandle>();
-    loop_timer->start(1s, 500ms);
+    loop_timer->start(1s, poll_time_fast);
     shared_ptr<uvw::PollHandle> loop_mqtt_poll;
+    bool fast_polling = true;
 
-    loop_timer->on<uvw::TimerEvent>([&uvloop, &mqtt_client](uvw::TimerEvent&, uvw::TimerHandle&)
+    loop_timer->on<uvw::TimerEvent>([&uvloop, &fast_polling, &loop_timer](uvw::TimerEvent&, uvw::TimerHandle&)
         {
             Log::Trace("Poll timer");
+            bool fast_poll_new = false;
             for (auto& door: doors)
             {
                 if (door.UpdateState())
@@ -199,8 +204,25 @@ int main(int argc, char **argv)
                     Log::Message("main: state changed!");
                     publish_state(door);
                 }
+                if (door.NeedFastPoll())
+                {
+                    fast_poll_new = true;
+                }
             }
             mqtt_client.Poll();
+            if (fast_poll_new != fast_polling)
+            {
+                if (fast_poll_new)
+                {
+                    loop_timer->repeat(poll_time_fast);
+                    Log::Message("main: start fast polling");
+                } else
+                {
+                    loop_timer->repeat(poll_time_slow);
+                    Log::Message("main: start slow polling");
+                }
+                fast_polling = fast_poll_new;
+            }
         });
 
     if (mqtt_client.Connect(mqtt_broker))
@@ -211,18 +233,19 @@ int main(int argc, char **argv)
 
         for (auto& door: doors)
         {
-            mqtt_client.SubscribeTopic(mqtt_prefix + to_string(door.GetIndex()) + "/command", [](string topic, string payload)
+            Door *doorp = &door;
+            mqtt_client.SubscribeTopic(mqtt_prefix + to_string(door.GetIndex()) + "/command", [doorp](string topic, string payload)
                 {
                     Log::Message("MQTT command: " + payload);
                     if (payload == "open")
                     {
-                        doors[0].DoOpen();
+                        doorp->DoOpen();
                     }
                     else if (payload == "close")
                     {
-                        doors[0].DoClose();
+                        doorp->DoClose();
                     }
-                    publish_state(doors[0]);
+                    publish_state(*doorp);
                 });
             publish_discovery(door);
         }

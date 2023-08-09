@@ -39,6 +39,8 @@ namespace dooragent
         bool DoOpen();
         bool DoClose();
 
+        bool NeedFastPoll() const;
+
         static std::string StateStr(State state);
 
     protected:

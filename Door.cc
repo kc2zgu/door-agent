@@ -182,12 +182,6 @@ bool Door::DoOpen()
         SendOpen();
         SetState(OpenStart);
         last_state_time = chrono::steady_clock::now();
-        if (gpio_open_btn)
-        {
-            gpio_open_btn.set_value(gpio_open_level ? 1 : 0);
-            usleep(btn_pulse_time * 1000);
-            gpio_open_btn.set_value(gpio_open_level ? 0 : 1);
-        }
         return true;
     }
     Log::Error("Door(" + to_string(index) + "): can't open in " + StateStr(current_state) + " state");
@@ -202,12 +196,6 @@ bool Door::DoClose()
         SendClose();
         SetState(Closing);
         last_state_time = chrono::steady_clock::now();
-        if (gpio_open_btn)
-        {
-            gpio_open_btn.set_value(gpio_open_level ? 1 : 0);
-            usleep(btn_pulse_time * 1000);
-            gpio_open_btn.set_value(gpio_open_level ? 0 : 1);
-        }
         return true;
     }
     Log::Error("Door(" + to_string(index) + "): can't close in " + StateStr(current_state) + " state");
@@ -216,10 +204,54 @@ bool Door::DoClose()
 
 void Door::SendOpen()
 {
+    if (gpio_open_btn)
+    {
+        gpio_open_btn.release();
+        gpiod::line_request req;
+        req.consumer = "door:" + to_string(index) + ".open";
+        req.request_type = gpiod::line_request::DIRECTION_OUTPUT;
+        req.flags = 0;
+        gpio_open_btn.request(req);
+        gpio_open_btn.set_value(gpio_open_level ? 1 : 0);
+        usleep(btn_pulse_time * 1000);
+        gpio_open_btn.set_value(gpio_open_level ? 0 : 1);
+    }
     
 }
 
 void Door::SendClose()
 {
-    
+    if (gpio_close_btn)
+    {
+        gpio_close_btn.release();
+        gpiod::line_request req;
+        req.consumer = "door:" + to_string(index) + ".close";
+        req.request_type = gpiod::line_request::DIRECTION_OUTPUT;
+        req.flags = 0;
+        gpio_close_btn.request(req);
+        gpio_close_btn.set_value(gpio_close_level ? 1 : 0);
+        usleep(btn_pulse_time * 1000);
+        gpio_close_btn.set_value(gpio_close_level ? 0 : 1);
+    } else
+    {
+        SendOpen();
+    }
+}
+
+bool Door::NeedFastPoll() const
+{
+    switch (current_state)
+    {
+    case InitSensing:
+    case Opening:
+    case OpeningSensed:
+    case OpenStart:
+    case Closing:
+        return true;
+    }
+
+    if (((closed_debounce_input & 0xFF) == 0) || ((closed_debounce_input & 0xFF) == 0xFF))
+        return false;
+
+    return true;
 }
